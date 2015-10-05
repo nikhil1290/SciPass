@@ -20,6 +20,8 @@ import ipaddr
 import pprint
 import copy
 import libxml2
+import json
+from collections import defaultdict
 from SimpleBalancer import SimpleBalancer
 
 class SciPass:
@@ -464,6 +466,12 @@ class SciPass:
                                                                                                     prefix = z,
                                                                                                     priority=a))
 
+        config[dpid][name]['balancer'].registerStateChangeHandler(lambda x, y, z : self.saveState(dpid = dpid,
+                                                                                                  domain_name = name,
+                                                                                                  groups = x,
+                                                                                                  prefix_list = y,
+                                                                                                  prefix_priorities = z))
+
         ports = ctxt.xpathEval("port")
         sensor_groups = ctxt.xpathEval("sensor_group")
         for port in ports:
@@ -754,6 +762,7 @@ class SciPass:
     self.config[dpid][domain_name]['balancer'].pushToSwitch()
         
 
+  
   def addPrefix(self, dpid=None, domain_name=None, group_id=None, prefix=None, priority=None):
     #self.logger.error("Add Prefix " + str(domain_name) + " " + str(group_id) + " " + str(prefix))
     #find the north and south port
@@ -993,6 +1002,36 @@ class SciPass:
     #delete and add the prefix
     self.delPrefix(dpid, domain_name, old_group_id, prefix, priority)
     self.addPrefix(dpid, domain_name, new_group_id, prefix, priority)
+
+  def saveState(self, dpid = None, domain_name = None, groups = None, prefix_list = None, prefix_priorities = None):
+    self.logger.debug("saving State")
+    self.logger.debug(str(dpid))
+    self.logger.debug(str(domain_name))
+    self.logger.debug(str(groups))
+    self.logger.debug(str(prefix_list))
+    self.logger.debug(str(prefix_priorities))
+    fileName = str(dpid) + str(domain_name) +".json"
+    group = copy.deepcopy(groups)
+    prefixes = []
+    priorities = {}
+    for k, v in group.iteritems():
+      v['prefixes']= [str(i) for i in v["prefixes"]]
+    
+    for prefix in prefix_list:
+      prefixes = [str(i) for i in prefix_list]
+    for k, v in prefix_priorities.iteritems():
+      priorities[str(k)] = v
+    curr_state = {}
+    curr_state["switch"] = {}
+    curr_state["switch"][dpid] = {}
+    curr_state["switch"][dpid]["domain"] = {} 
+    curr_state["switch"][dpid]["domain"][domain_name] = {}
+    curr_state["switch"][dpid]["domain"][domain_name]["groups"] = group
+    curr_state["switch"][dpid]["domain"][domain_name]["prefixes"] = prefixes
+    curr_state["switch"][dpid]["domain"][domain_name]["priorities"] = priorities
+    with open(fileName, 'w') as fd:
+      json.dump([curr_state], fd)
+    fd.close()
 
   def remove_flow(self, header, priority):
     self.logger.debug("remove flow")
