@@ -468,9 +468,11 @@ class SciPass:
 
         config[dpid][name]['balancer'].registerStateChangeHandler(lambda x, y, z : self.saveState(dpid = dpid,
                                                                                                   domain_name = name,
+                                                                                                  mode = mode,
                                                                                                   groups = x,
                                                                                                   prefix_list = y,
-                                                                                                  prefix_priorities = z))
+                                                                                                  splitPrefixes = z
+                                                                                                  ))
 
         ports = ctxt.xpathEval("port")
         sensor_groups = ctxt.xpathEval("sensor_group")
@@ -521,8 +523,64 @@ class SciPass:
     self.config = config      
     doc.freeDoc()
     ctxt.xpathFreeContext()
-    
+    for dpid in self.config:
+      for domain in self.config[dpid]:
+        self.readState(dpid, domain, self.config[dpid][domain]["mode"])
+        
+  
+  def readState(self, dpid=None,domain=None, mode=None):
+    state=  str(dpid) + str(domain)  + ".json"
+    try:
+      with open(state) as data_file:    
+        data = json.load(data_file)
+        data = data[0]
+    except IOError:
+      return
+    if mode != self.config[dpid][domain]["mode"]:
+      """ If the mode is not same as previous mode -> start over"""
+      return
+    prevSplitPrefixes = defaultdict(list)
+    prevPrefixes = [] #List of previous prefixes when not split
+    currPrefixes = {} # dict of current prefixes and port that they are listed on
+    ports = self.config[dpid][domain]['ports']
 
+    # calculate the previous prefixes
+    for prefix in data["switch"][dpid]["domain"][domain]["mode"][mode]["prefixes"]:
+      try:
+        prevPrefixes.append(ipaddr.IPv4Network(prefix))
+      except:
+        prevPrefixes.append(ipaddr.IPv6Network(prefix))
+
+    # Calculate the current prefixes
+    for in_port in ports['lan']:
+      for prefix in in_port['prefixes']:
+        currPrefixes[prefix['prefix']] = {"port" : int(in_port['port_id'])}
+    #calculate previous Split Prefixes
+    for prefix, splitPrefix in data["switch"][dpid]["domain"][domain]["mode"][mode]["splitprefixes"].iteritems():
+      for pfix in splitPrefix:
+        prevSplitPrefixes[ipaddr.IPv4Network(prefix)].append(ipaddr.IPv4Network(pfix))
+  
+    if not prevSplitPrefixes:
+      """If no prefixes have been splitted by balancer earlier"""
+      return
+    
+    for prefix, splitPrefix in prevSplitPrefixes.iteritems():
+      if prefix in currPrefixes.keys():
+        for pfix in splitPrefix:
+          prefix_obj = {'prefix': ipaddr.IPv4Network(pfix),
+                        'prefix_str': str(pfix),
+                        'type': 'v4'}
+          for in_port in self.config[dpid][domain]['ports']["lan"]:
+            if int(currPrefixes[prefix]["port"]) == int(in_port['port_id']):
+              in_port["prefixes"].append(prefix_obj)
+      for in_port in self.config[dpid][domain]['ports']["lan"]:
+        for pfix in  in_port["prefixes"]:
+          if  pfix["prefix"] == prefix:
+            in_port["prefixes"].remove(pfix)
+        
+    pprint.pprint(self.config[dpid][domain]['ports']['lan'])      
+          
+    
   def switchLeave(self, datapath):
     if datapath in self.switches:
       self.switches.remove(datapath)
@@ -1003,32 +1061,33 @@ class SciPass:
     self.delPrefix(dpid, domain_name, old_group_id, prefix, priority)
     self.addPrefix(dpid, domain_name, new_group_id, prefix, priority)
 
-  def saveState(self, dpid = None, domain_name = None, groups = None, prefix_list = None, prefix_priorities = None):
+  def saveState(self, dpid = None, domain_name = None, mode = None, groups = None, prefix_list = None, splitPrefixes = None):
     self.logger.debug("saving State")
     self.logger.debug(str(dpid))
     self.logger.debug(str(domain_name))
+    self.logger.debug(str(mode))
     self.logger.debug(str(groups))
     self.logger.debug(str(prefix_list))
-    self.logger.debug(str(prefix_priorities))
+    self.logger.debug(str(splitPrefixes))
     fileName = str(dpid) + str(domain_name) +".json"
     group = copy.deepcopy(groups)
     prefixes = []
-    priorities = {}
     for k, v in group.iteritems():
       v['prefixes']= [str(i) for i in v["prefixes"]]
     
     for prefix in prefix_list:
       prefixes = [str(i) for i in prefix_list]
-    for k, v in prefix_priorities.iteritems():
-      priorities[str(k)] = v
+          
     curr_state = {}
     curr_state["switch"] = {}
     curr_state["switch"][dpid] = {}
     curr_state["switch"][dpid]["domain"] = {} 
     curr_state["switch"][dpid]["domain"][domain_name] = {}
-    curr_state["switch"][dpid]["domain"][domain_name]["groups"] = group
-    curr_state["switch"][dpid]["domain"][domain_name]["prefixes"] = prefixes
-    curr_state["switch"][dpid]["domain"][domain_name]["priorities"] = priorities
+    curr_state["switch"][dpid]["domain"][domain_name]["mode"] = {}
+    curr_state["switch"][dpid]["domain"][domain_name]["mode"][mode] = {}
+    curr_state["switch"][dpid]["domain"][domain_name]["mode"][mode]["groups"] = group
+    curr_state["switch"][dpid]["domain"][domain_name]["mode"][mode]["prefixes"] = prefixes
+    curr_state["switch"][dpid]["domain"][domain_name]["mode"][mode]["splitprefixes"] = splitPrefixes
     with open(fileName, 'w') as fd:
       json.dump([curr_state], fd)
     fd.close()

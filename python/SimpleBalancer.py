@@ -84,7 +84,7 @@ class SimpleBalancer:
       
       #--- prefix bandwidth in GigaBits/sec
       self.prefixBW		       = defaultdict(float)
-
+      self.splitPrefixes = defaultdict(list)
       self.addPrefixHandlers  = []
       self.delPrefixHandlers  = []
       self.movePrefixHandlers = []
@@ -391,15 +391,15 @@ class SimpleBalancer:
     """When called will fire each of the registered add prefix handlers"""
     for handler in self.addPrefixHandlers:
         handler(group,prefix, priority)
+
   def fireSaveState(self):
       for handler in self.saveStateChangeHandlers:
-          handler(self.groups, self.prefix_list, self.prefixPriorities)
+          handler(self.groups, self.prefix_list, self.splitPrefixes)
 
   def fireDelPrefix(self,group,prefix, priority):
     """When called will fire each of the registered del prefix handlers"""
     for handler in self.delPrefixHandlers:
         handler(group,prefix, priority)
-    
 
   def fireMovePrefix(self,oldGroup,newGroup,prefix, priority):
     """when called will fire each of the registered move prefix handlers"""
@@ -423,8 +423,6 @@ class SimpleBalancer:
           self.fireDelPrefix(group,targetPrefix, priority['priority'])
         #--- remove from list
           prefixList.pop(x)
-          if prefix in self.prefix_list:
-              self.prefix_list.remove(prefix)
           self.prefixCount = self.prefixCount -1
           if(self.prefixBW.has_key(targetPrefix)):
               del self.prefixBW[targetPrefix]
@@ -471,7 +469,6 @@ class SimpleBalancer:
     #--- call function to add this to the switch
     self.fireAddPrefix(group,targetPrefix, priority['priority'])
     self.groups[group]['prefixes'].append(targetPrefix)
-    self.addPrefix(targetPrefix)
     self.prefixCount = self.prefixCount + 1
     self.prefixBW[targetPrefix] = bw
     self.fireSaveState()
@@ -522,6 +519,8 @@ class SimpleBalancer:
               self.logger.debug( "  -- "+str(prefix)+" bw "+str((prefixBw / 1000 / 1000)) + "Mbps" )
               self.delGroupPrefix(group, candidatePrefix)
               self.prefixPriorities[prefix] = {'priority': cur_priority, 'total': incrementer}
+              self.logger.error(prefix)
+              self.splitPrefixes[str(candidatePrefix)].append(str(prefix))
               self.addGroupPrefix(group, prefix, prefixBw)
               cur_priority += incrementer
               

@@ -36,17 +36,17 @@ class TestPrefix(unittest.TestCase):
         assert(switches[0] == "%016x" % self.datapath.id)      
         domain = data["switch"]["%016x" % self.datapath.id]["domain"].keys()
         assert(domain[0] == "R&E")
-        groups = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["groups"].keys()
+        mode = data["switch"]["%016x" % self.datapath.id]["domain"][domain[0]]["mode"].keys()
+        assert(mode[0] == "SciDMZ")
+        groups = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["mode"]["SciDMZ"]["groups"].keys()
         for group in groups:
             assert(group in ["group1", "group2", "group3", "group4"])         
-            sensors = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["groups"][group]["sensors"]
-        prefixes = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["prefixes"]
+            sensors = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["mode"]["SciDMZ"]["groups"][group]["sensors"]
+        prefixes = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["mode"]["SciDMZ"]["prefixes"]
         for prefix in prefixes:
             assert(prefix in ["10.0.17.0/24","10.0.18.0/24","10.0.19.0/24","10.0.20.0/24","::/128"])
-        priorities = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["priorities"].keys()
-        for priority in priorities:
-            assert(priority in ["10.0.17.0/24","10.0.18.0/24","10.0.19.0/24","10.0.20.0/24","::/128"])
-            
+        
+    
             
     def test_sensor_prefix_split(self):
         self.api.getBalancer("%016x" % self.datapath.id, "R&E").splitSensorPrefix("group1",ipaddr.IPv4Network("10.0.18.0/24"))
@@ -54,13 +54,10 @@ class TestPrefix(unittest.TestCase):
         with open(self.file) as data_file:
             data = json.load(data_file)
         data = data[0]
-        prefixes = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["groups"]["group1"]["prefixes"]
+        prefixes = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["mode"]["SciDMZ"]["groups"]["group1"]["prefixes"]
         for prefix in prefixes:
             assert(prefix in ["10.0.18.0/25", "10.0.18.128/25"])
-        prefixes = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["prefixes"]
-        assert("10.0.18.0/25" in prefixes)
-        assert("10.0.18.0/25" in prefixes)
-        assert("10.0.18.0/24" not in prefixes)
+    
 
     def test_move_prefix(self):
         self.api.getBalancer("%016x" % self.datapath.id, "R&E").splitSensorPrefix("group1",ipaddr.IPv4Network("10.0.18.0/24"))
@@ -68,9 +65,9 @@ class TestPrefix(unittest.TestCase):
         with open(self.file) as data_file:
             data = json.load(data_file)
         data = data[0]
-        prefixes = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["groups"]["group2"]["prefixes"]
+        prefixes = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["mode"]["SciDMZ"]["groups"]["group2"]["prefixes"]
         assert("10.0.18.128/25" in prefixes)
-        prefixes = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["groups"]["group1"]["prefixes"]
+        prefixes = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["mode"]["SciDMZ"]["groups"]["group1"]["prefixes"]
         assert("10.0.18.128/25" not in prefixes)
 
     def test_add_prefix(self):
@@ -78,7 +75,7 @@ class TestPrefix(unittest.TestCase):
         with open(self.file) as data_file:
             data = json.load(data_file)
         data = data[0]
-        prefixes = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["groups"]["group1"]["prefixes"]
+        prefixes = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["mode"]["SciDMZ"]["groups"]["group1"]["prefixes"]
         assert("10.0.20.0/24" in prefixes)
         
     def test_del_prefix(self):
@@ -86,16 +83,16 @@ class TestPrefix(unittest.TestCase):
         with open(self.file) as data_file:
             data = json.load(data_file)
         data = data[0]
-        prefixes = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["groups"]["group1"]["prefixes"]
+        prefixes = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["mode"]["SciDMZ"]["groups"]["group1"]["prefixes"]
         assert("10.0.20.0/24" in prefixes)
         self.api.getBalancer("%016x" % self.datapath.id, "R&E").delGroupPrefix("group1",ipaddr.IPv4Network("10.0.20.0/24"))
         with open(self.file) as data_file:
             data = json.load(data_file)
         data = data[0]
-        prefixes = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["groups"]["group1"]["prefixes"]
+        prefixes = data["switch"]["%016x" % self.datapath.id]["domain"]["R&E"]["mode"]["SciDMZ"]["groups"]["group1"]["prefixes"]
         assert("10.0.20.0/24" not in prefixes)
-
-
+        
+     
 def suite():
     suite = unittest.TestLoader().loadTestsFromTestCase(TestPrefix)
     return suite
