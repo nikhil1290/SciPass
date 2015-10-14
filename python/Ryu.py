@@ -26,6 +26,7 @@ from ryu.controller.handler import MAIN_DISPATCHER, DEAD_DISPATCHER
 from ryu.controller.handler import set_ev_cls
 from ryu.ofproto import ether
 from ryu.ofproto import ofproto_v1_0
+from ryu.ofproto import ofproto_v1_3
 from ryu.lib import hub
 from ryu.lib import dpid as dpid_lib
 from ryu.app.wsgi import ControllerBase, WSGIApplication, route
@@ -194,8 +195,159 @@ class Ryu(app_manager.RyuApp):
         ofp      = datapath.ofproto
         parser   = datapath.ofproto_parser
 
-        obj = {} 
+        flow = None
+
+        #support different OF versions!
+        if(ofp.OFP_VERSION == ofproto_v1_3.OFP_VERSION):
+            self.logger.debug("Generating OF 1.3 FlowMod")
+            flow = self.OF10_flow(datapath, header=header, actions=actions, command=command, idle_timeout=idle_timeout, hard_timeout=hard_timeout, priority=priority)
+        elif (ofp.OFP_VERSION == ofproto_v1_0.OFP_VERSION):
+            self.logger.debug("Generating OF 1.0 FlowMod")
+            flow = self.OF13_flow(datapath, header=header, actions=actions, command=command, idle_timeout=idle_timeout, hard_timeout=hard_timeout, priority=priority)
+        else:
+            self.logger.error("Unsupported OF Version")
+            return
+
+        if(datapath.is_active == True):
+            datapath.send_msg(mod)
+        else:
+            self.logger.error("Device is not connected")
+
+    def OF13_flow_rule(self, dp=None, header=None, actions=None, command=None, idle_timeout=None, hard_timeout=None, priority=1):
+        obj = {}
+       
+        if(header.has_key('phys_port')):
+            obj['in_port'] = int(header['phys_port'])
+        else:
+            obj['in_port'] = None
+            
         
+        if(header.has_key('nw_src')):
+            if(header['nw_src'].version == 4):
+                if(header.has_key['nw_src_mask']):
+                    obj['ipv4_src'] = header['nw_src'] + "/" + header['nw_src_mask']
+                else:
+                    obj['ipv4_src'] = header['nw_src'] + "/32"
+                obj['dl_type'] = 0x800
+            elif(header['nw_src'].version == 6):
+                if(header.has_key['nw_src_mask']):
+                    obj['ipv6_src'] = header['nw_src'] + "/" + header['nw_src_mask']
+                else:
+                    obj['ipv6_src'] = header['nw_src'] + "/128"
+                obj['dl_type'] = 0x86dd
+        else:
+            obj['nw_src'] = None
+
+        if(header.has_key('nw_dst')):
+            if(header['nw_dst'].version == 4):
+                if(obj.has_key('ipv6_src')):
+                    self.logger.error("IPv4 and IPv6 in the same message")
+                    return
+                if(header.has_key['nw_dst_mask']):
+                    obj['ipv4_dst'] = header['nw_dst'] + "/" + header['nw_dst_mask']
+                else:
+                    obj['ipv4_dst'] = header['nw_dst'] + "/32"
+                obj['dl_type'] = 0x800
+            elif(header['nw_dst'].version == 6):
+                if(obj.has_key('ipv4_src')):
+                    self.logger.error("IPv4 and IPv6 in the same message")
+                    return
+                if(header.has_key['nw_dst_mask']):
+                    obj['ipv6_dst'] = header['nw_dst'] + "/" + header['nw_dst_mask']
+                else:
+                    obj['ipv6_dst'] = header['nw_dst'] + "/128"
+                obj['dl_type'] = 0x86dd
+        else:
+            obj['nw_dst'] = None
+        
+        if(header.has_key('tcp_src') and header.has_key('udp_dst')):
+            self.logger.error("TCP and UDP ports")
+            return
+            
+        if(header.has_key('tcp_dst') and header.has_key('udp_src')):
+            self.logger.error("TCP and UDP ports")
+            return
+
+        if(header.has_key('udp_src') and header.has_key('tcp_dst')):
+            self.logger.error("TCP and UDP ports")
+            return
+
+        if(header.has_key('udp_dst') and header.has_key('tcp_src')):
+            self.logger.error("TCP and UDP ports")
+            return
+            
+        if(header.has_key('tcp_src') and header.has_key('udp_src')):
+            self.logger.error("TCP and UDP ports")
+            return
+
+        if(header.has_key('tcp_dst') and header.has_key('udp_dst')):
+            self.logger.error("TCP and UDP ports")
+            return
+                    
+        if(header.has_key('tcp_src')):
+            obj['tcp_src'] = header['tcp_src']
+            obj['ip_proto'] = 6
+
+        if(header.has_key('tcp_dst')):
+            obj['tcp_dst'] = header['tcp_dst']
+            obj['ip_proto'] = 6
+
+        if(header.has_key('udp_src')):
+            obj['udp_src'] = header['udp_src']
+            obj['ip_proto'] = 17
+
+        if(header.has_key('udp_dst')):
+            obj['udp_dst'] = header['udp_dst']
+            obj['ip_proto'] = 17
+
+        match = parser.OFPMatch( in_port     = obj['in_port'],
+                                 ipv4_src    = obj['ipv4_src'],
+                                 ipv4_dst    = obj['ipv4_dst'],
+                                 ipv6_src    = obj['ipv6_src'],
+                                 ipv6_dst    = obj['ipv6_dst'],
+                                 tcp_src     = obj['tcp_src'],
+                                 tcp_dst     = obj['tcp_dst'],
+                                 udp_src     = obj['udp_src'],
+                                 udp_dst     = obj['udp_dst'],
+                                 ip_proto    = obj['ip_proto']
+                                 )
+
+        of_actions = []
+        for action in actions:
+            if(action['type'] == "output"):
+                of_actions.append(parser.OFPActionOutput(int(action['port']),0))
+
+        self.logger.debug("Actions: " + str(of_actions))
+        flags = 0
+        if(command == "ADD"):
+            command = ofp.OFPFC_ADD
+            flags = ofp.OFPFF_SEND_FLOW_REM
+        elif(command == "DELETE_STRICT"):
+            command = ofp.OFPFC_DELETE_STRICT
+        else:
+            command = ofp.OFPFC_DELETE
+
+        of_actions.append(parser.OFPActionOutput(int(action[1][1]),int(action[1][0])))
+
+        inst = [parser.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS,
+                                             of_actions)]
+        mod = parser.OFPFlowMod( datapath,
+                                 cookie = 0,
+                                 cookie_mask = 0,
+                                 priority = attrs.get('PRIORITY'),
+                                 buffer_id = ofp.OFP_NO_BUFFER,
+                                 match    = match,
+                                 command  = ofp.OFPFC_ADD,
+                                 instructions  = inst,
+                                 idle_timeout = attrs.get('IDLE_TIMEOUT'),
+                                 hard_timeout = attrs.get('HARD_TIMEOUT'),
+                                 out_port = ofp.OFPP_ANY,
+                                 out_group = ofp.OFPG_ANY)
+
+        return mod
+        
+    def OF10_flow_rule(self, dp=None, header=None, actions=None, command=None, idle_timeout=None, hard_timeout=None, priority=1):
+        obj = {}
         if(header.has_key('dl_type')):
             if(header['dl_type'] == None):
                 obj['dl_type'] = None
@@ -233,12 +385,12 @@ class Ryu(app_manager.RyuApp):
             obj['tp_src'] = int(header['tp_src'])
         else:
             obj['tp_src'] = None
-
+            
         if(header.has_key('tp_dst')):
             obj['tp_dst'] = int(header['tp_dst'])
         else:
             obj['tp_dst'] = None
-
+            
         if(obj['dl_type'] == None):
             match = parser.OFPMatch( in_port     = obj['in_port'],
                                      nw_dst      = obj['nw_dst'],
@@ -248,7 +400,6 @@ class Ryu(app_manager.RyuApp):
                                      tp_src      = obj['tp_src'],
                                      tp_dst      = obj['tp_dst'])
         else:
-            
             match = parser.OFPMatch( in_port     = obj['in_port'],
                                      nw_dst      = obj['nw_dst'],
                                      nw_dst_mask = obj['nw_dst_mask'],
@@ -258,25 +409,26 @@ class Ryu(app_manager.RyuApp):
                                      tp_src      = obj['tp_src'],
                                      tp_dst      = obj['tp_dst'])
             
-        #self.logger.error("Match: " + str(match))
+        self.logger.debug("Match: " + str(match))
         
         of_actions = []
         for action in actions:
             if(action['type'] == "output"):
                 of_actions.append(parser.OFPActionOutput(int(action['port']),0))
-           
-        #self.logger.error("Actions: " + str(of_actions))
-        flags = 0
-        if(command == "ADD"):
-            command = ofp.OFPFC_ADD
-            flags = ofp.OFPFF_SEND_FLOW_REM
-        elif(command == "DELETE_STRICT"):
-            command = ofp.OFPFC_DELETE_STRICT
-        else:
-            command = -1
-        #self.logger.error("Sending flow mod with command: " + str(command))
-        #self.logger.error("Datpath: " + str(datapath))
+                
+            self.logger.debug("Actions: " + str(of_actions))
+            flags = 0
+            if(command == "ADD"):
+                command = ofp.OFPFC_ADD
+                flags = ofp.OFPFF_SEND_FLOW_REM
+            elif(command == "DELETE_STRICT"):
+                command = ofp.OFPFC_DELETE_STRICT
+            else:
+                command = -1
 
+        self.logger.debug("Sending flow mod with command: " + str(command))
+        self.logger.debug("Datpath: " + str(datapath))
+        
         mod = parser.OFPFlowMod( datapath     = datapath,
                                  priority     = int(priority),
                                  match        = match,
@@ -286,11 +438,8 @@ class Ryu(app_manager.RyuApp):
                                  hard_timeout = int(hard_timeout),
                                  actions      = of_actions,
                                  flags        = flags)
+        return mod
 
-        if(datapath.is_active == True):
-            datapath.send_msg(mod)
-        else:
-            self.logger.error("Device is not connected")
 
     def flushRules(self, dpid):
         if(not self.datapaths.has_key(dpid)):
