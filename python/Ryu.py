@@ -146,7 +146,7 @@ class SciPassRest(ControllerBase):
 
 
 class Ryu(app_manager.RyuApp):
-    OFP_VERSIONS = [ofproto_v1_0.OFP_VERSION]
+    OFP_VERSIONS = [ofproto_v1_0.OFP_VERSION, ofproto_v1_3.OFP_VERSION]
     _CONTEXTS = { 'wsgi': WSGIApplication }
     
     def __init__(self, *args, **kwargs):
@@ -169,7 +169,7 @@ class Ryu(app_manager.RyuApp):
         
         self.ports = defaultdict(dict);
         self.prefix_bytes = defaultdict(lambda: defaultdict(int))
-        self.lastStatsTime = None
+        self.lastStatsTime = []
         self.flowmods = {}
         
         api = SciPass(logger = self.logger,
@@ -225,15 +225,17 @@ class Ryu(app_manager.RyuApp):
         if(header.has_key('nw_src')):
             if(header['nw_src'].version == 4):
                 if(header.has_key['nw_src_mask']):
-                    obj['ipv4_src'] = header['nw_src'] + "/" + header['nw_src_mask']
+                    addr = ipaddr.IPv4Network(header['nw_src'] + "/" + header['nw_src_mask'])
+                    obj['ipv4_src'] = str(addr)
                 else:
-                    obj['ipv4_src'] = header['nw_src'] + "/32"
+                    obj['ipv4_src'] = str(ipaddr.IPv4Network(header['nw_src']))
                 obj['dl_type'] = 0x800
             elif(header['nw_src'].version == 6):
                 if(header.has_key['nw_src_mask']):
-                    obj['ipv6_src'] = header['nw_src'] + "/" + header['nw_src_mask']
+                    addr = ipaddr.IPv6Network(header['nw_src'] + "/" + header['nw_src_mask'])
+                    obj['ipv6_src'] = str(addr)
                 else:
-                    obj['ipv6_src'] = header['nw_src'] + "/128"
+                    obj['ipv6_src'] = str(ipaddr.IPv4Network(header['nw_src']))
                 obj['dl_type'] = 0x86dd
         else:
             obj['nw_src'] = None
@@ -244,18 +246,20 @@ class Ryu(app_manager.RyuApp):
                     self.logger.error("IPv4 and IPv6 in the same message")
                     return
                 if(header.has_key['nw_dst_mask']):
-                    obj['ipv4_dst'] = header['nw_dst'] + "/" + header['nw_dst_mask']
+                    addr = ipaddr.IPv4Network(header['nw_dst'] + "/" + header['nw_dst_mask'])
+                    obj['ipv4_dst'] = str(addr)
                 else:
-                    obj['ipv4_dst'] = header['nw_dst'] + "/32"
+                    obj['ipv4_dst'] = str(ipaddr.IPv4Network(header['nw_dst']))
                 obj['dl_type'] = 0x800
             elif(header['nw_dst'].version == 6):
                 if(obj.has_key('ipv4_src')):
                     self.logger.error("IPv4 and IPv6 in the same message")
                     return
                 if(header.has_key['nw_dst_mask']):
-                    obj['ipv6_dst'] = header['nw_dst'] + "/" + header['nw_dst_mask']
+                    addr = ipaddr.IPv6Network(header['nw_dst'] + "/" + header['nw_dst_mask'])
+                    obj['ipv6_dst'] = str(addr)
                 else:
-                    obj['ipv6_dst'] = header['nw_dst'] + "/128"
+                    obj['ipv6_dst'] = str(ipaddr.IPv6Network(header['nw_dst']))
                 obj['dl_type'] = 0x86dd
         else:
             obj['nw_dst'] = None
@@ -650,9 +654,15 @@ class Ryu(app_manager.RyuApp):
         priority =  flow.priority
         self.api.remove_flow(header,priority)
         
-
     def process_flow_stats(self, stats, dp):
-        self.logger.debug("flow stat processor")
+        ofp = dp.ofproto
+        if(ofp.OFP_VERSION == ofproto_v1_3.OFP_VERSION):
+            self.process_flow_stats_of13(stats,dp)
+        elif(ofp.OFP_VERSION == ofproto_v1_0.OFP_VERSION):
+            self.process_flow_stats_of10(stats,dp)
+
+    def process_flow_stats_of13(self, stats, dp):
+        self.logger.debug("flow stat processor 1.0")
         self.logger.debug("flows stats: " + str(len(stats)))
         #--- figure out the time since last stats
         prefix_bps = defaultdict(lambda: defaultdict(int))
@@ -660,17 +670,39 @@ class Ryu(app_manager.RyuApp):
         flows = []
         dpid = dp.id
         ofproto = dp.ofproto
-        old_time = self.lastStatsTime
+        old_time = self.lastStatsTime[dpid]
+        now = int(time.time())
+        
+        stats_et = None
+        if(old_time != None):
+            stats_et = now - old_time
+
+        self.lastStatsTime[dpid] = now
+
+        for stat in stats:
+            dur_sec = stat.duration_sec
+            in_port = stat.match.in_port
+            
+
+    def process_flow_stats_of10(self, stats, dp):
+        self.logger.debug("flow stat processor 1.0")
+        self.logger.debug("flows stats: " + str(len(stats)))
+        #--- figure out the time since last stats
+        prefix_bps = defaultdict(lambda: defaultdict(int))
+        prefix_bytes = {}
+        flows = []
+        dpid = dp.id
+        ofproto = dp.ofproto
+        old_time = self.lastStatsTime[dpid]
         now = int(time.time())
 
         stats_et = None
         if(old_time != None):
             stats_et = now - old_time
 
-        self.lastStatsTime = now
+        self.lastStatsTime[dpid] = now
 
         for stat in stats:
-            
             dur_sec = stat.duration_sec
             in_port = stat.match.in_port
             src_mask = 32 - ((stat.match.wildcards & ofproto.OFPFW_NW_SRC_MASK) >> ofproto.OFPFW_NW_SRC_SHIFT)
