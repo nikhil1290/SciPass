@@ -683,6 +683,109 @@ class Ryu(app_manager.RyuApp):
             dur_sec = stat.duration_sec
             in_port = stat.match.in_port
             
+            #is it IPv6
+            prefix = None
+            if(stat.match.dl_type == 0x86bb):
+
+                if(stat.match.ipv6_src > 0):
+                    prefix = ipaddr.IPv6Network(stat.match.ipv6_src)
+                    dir = "tx"
+                elif(stat.match.ipv6_dst > 0):
+                    prefix = ipaddr.IPv6Network(stat.match.ipv6_dst)
+                    dir = "rx"
+
+            if(stat.match.dl_type == 0x800):
+                prefix = None
+                if(stat.match.ipv4_src > 0):
+                    prefix = ipaddr.IPv4Network(stat.match.ipv4_src)
+                elif(stat.match.ipv4_dst > 0):
+                    prefix = ipaddr.IPv4Network(stat.match.ipv4_dst)
+                    
+            if(not prefix_bytes.has_key(prefix)):
+                prefix_bytes[prefix] = {}
+                prefix_bytes[prefix]["tx"] = 0
+                prefix_bytes[prefix]["rx"] = 0
+
+
+            match = stat.match.__dict__
+            wildcards = stat.match.wildcards
+            del match['dl_dst']
+            del match['dl_src']
+            del match['dl_type']
+            del match['wildcards']
+
+            if(match['dl_vlan_pcp'] == 0):
+                del match['dl_vlan_pcp']
+
+            if(match['dl_vlan'] == 0):
+                del match['dl_vlan']
+
+            if(match['ip_proto'] == 0):
+                del match['ip_proto']
+
+            if(match['nw_tos'] == 0):
+                del match['nw_tos']
+
+            if(match['ipv4_src'] == 0):
+                del match['ipv4_src']
+
+            if(match['ipv4_dst'] == 0):
+                del match['ipv4_dst']
+
+            if(match['ipv6_src'] == 0):
+                del match['ipv6_src']
+
+            if(match['ipv6_dst'] == 0):
+                del match['ipv6_dst']
+
+            if(match['tcp_src'] == 0):
+                del match['tcp_src']
+
+            if(match['tcp_dst'] == 0):
+                del match['tcp_dst']
+
+            if(match['udp_src'] == 0):
+                del match['udp_src']
+
+            if(match['udp_dst'] == 0):
+                del match['udp_dst']
+
+            if(match['in_port'] == 0):
+                del match['in_port']
+            else:
+                match['phys_port'] = int(match['in_port'])
+                del match['in_port']
+
+        for prefix in prefix_bytes:
+            for dir in ("rx","tx"):
+                old_bytes = self.prefix_bytes[prefix][dir]
+                new_bytes = prefix_bytes[prefix][dir]
+                bytes = new_bytes - old_bytes
+                #if we are less than the previous counter then we re-balanced
+                #set back to 0 and start again
+                if(bytes < 0):
+                    self.prefix_bytes[prefix][dir] = 0
+                    bytes = 0
+
+                if(stats_et == None):
+                    stats_et = 0
+
+                try:
+                    rate = bytes / float(int(stats_et))
+                except ZeroDivisionError:
+                    self.logger.debug("Division by zero, rate = 0")
+                    rate = 0
+
+                prefix_bps[prefix][dir] = rate
+                self.prefix_bytes[prefix][dir] = prefix_bytes[prefix][dir]
+
+        #--- update the balancer
+        for prefix in prefix_bps.keys():
+          rx = prefix_bps[prefix]["rx"]
+          tx = prefix_bps[prefix]["tx"]
+          self.api.updatePrefixBW("%016x" % dpid, prefix, tx, rx)
+
+        self.api.TimeoutFlows("%016x" % dpid, flows)
 
     def process_flow_stats_of10(self, stats, dp):
         self.logger.debug("flow stat processor 1.0")
