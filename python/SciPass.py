@@ -195,23 +195,20 @@ class SciPass:
     if(obj.has_key('nw_src')):
       if(reverse):
         prefix = ipaddr.IPv4Network(obj['nw_src'])
-        header['nw_dst'] = int(prefix)
-        header['nw_dst_mask'] = int(prefix.prefixlen)
+        header['nw_dst'] = prefix
       else:
         prefix = ipaddr.IPv4Network(obj['nw_src'])
-        header['nw_src'] = int(prefix)
-        header['nw_src_mask'] = int(prefix.prefixlen)
+        header['nw_src'] = prefix
         
     if(obj.has_key('nw_dst')):
       if(reverse):
         prefix = ipaddr.IPv4Network(obj['nw_dst'])
-        header['nw_src'] = int(prefix)
-        header['nw_src_mask'] = int(prefix.prefixlen)
+        header['nw_src'] = prefix
       else:
         prefix = ipaddr.IPv4Network(obj['nw_dst'])
-        header['nw_dst'] = int(prefix)
-        header['nw_dst_mask'] = int(prefix.prefixlen)
+        header['nw_dst'] = prefix
 
+    #OF10
     if(obj.has_key('tp_src')):
       if(reverse):
         header['tp_dst'] = int(obj['tp_src'])
@@ -224,6 +221,32 @@ class SciPass:
       else:
         header['tp_dst'] = int(obj['tp_dst'])
    
+    #OF13
+    if(obj.has_key('tcp_src')):
+      if(reverse):
+        header['tcp_dst'] = int(obj['tcp_src'])
+      else:
+        header['tcp_src'] = int(obj['tcp_src'])
+
+    if(obj.has_key('tcp_dst')):
+      if(reverse):
+        header['tcp_src'] = int(obj['tcp_dst'])
+      else:
+        header['tcp_dst'] = int(obj['tcp_dst'])
+  
+    if(obj.has_key('udp_src')):
+      if(reverse):
+        header['udp_dst'] = int(obj['udp_src'])
+      else:
+        header['udp_src'] = int(obj['udp_src'])
+                            
+    if(obj.has_key('udp_dst')):
+      if(reverse):
+        header['udp_src'] = int(obj['udp_dst'])
+      else:
+        header['udp_dst'] = int(obj['udp_dst'])
+
+
     return header
 
   def bad_flow(self, obj):
@@ -482,10 +505,14 @@ class SciPass:
               #eventually we'll be able to do this, but for now
               #we are going to hardcode ::/128 so that its considered a single 
               #prefix that is not divisible anymore
+              #prefix_obj = {"type": prefix.prop("type"),
+              #              "prefix_str": "::/128", #prefix.getContent(),
+              #              "prefix": ipaddr.IPv6Network(prefix.getContent())}
               prefix_obj = {"type": prefix.prop("type"),
-                            "prefix_str": "::/128", #prefix.getContent(),
-                            "prefix": ipaddr.IPv6Network(prefix.getContent())}
-                            
+                            "prefix_str": prefix.getContent(),
+                            "prefix": ipaddr.IPv6Newtork(prefix.getContent())}
+
+              
             prefixes_array.append(prefix_obj)
 
           config[dpid][name]['ports'][ptype].append({"port_id": port.prop("of_port_id"),
@@ -596,13 +623,8 @@ class SciPass:
         #specific prefix forwarding rules
         #FW LAN to specific LAN PORT
         header = {}
-        if(prefix['type'] != "v4" and prefix['type'] != "ipv4"):
-          header = {"dl_type": 34525,
-                    "phys_port": int(ports['fw_lan'][0]['port_id'])}
-        else:
-          header = {"phys_port": int(ports['fw_lan'][0]['port_id']),
-                    "nw_dst": int(prefix['prefix']),
-                    "nw_dst_mask": int(prefix['prefix'].prefixlen)}
+        header = {"phys_port": int(ports['fw_lan'][0]['port_id']),
+                  "nw_dst": prefix['prefix']}
         
         actions = []
         actions.append({"type": "output",
@@ -619,13 +641,8 @@ class SciPass:
         
         #SPECIFIC LAN -> FW LAN port
         header = {}
-        if(prefix['type'] != "v4" and prefix['type'] != "ipv4"):
-          header = {"dl_type": 34525,
-                    "phys_port": int(in_port['port_id'])}
-        else:
-          header = {"phys_port": int(in_port['port_id']),
-                    "nw_src": int(prefix['prefix']),
-                    "nw_src_mask": int(prefix['prefix'].prefixlen)}
+        header = {"phys_port": int(in_port['port_id']),
+                  "nw_src": prefix['prefix']}
 
         actions = []
         actions.append({"type": "output",
@@ -763,8 +780,7 @@ class SciPass:
       if(prefix._version != 4):
         header = {"dl_type": 34525}
       else:
-        header = {"nw_src":      int(prefix),
-                  "nw_src_mask": int(prefix.prefixlen)}
+        header = {"nw_src": prefix}
         
       actions = []
       #output to sensor (basically this is the IDS balance case)
@@ -784,11 +800,7 @@ class SciPass:
                                               priority     = priority)
 
 
-      if(prefix._version != 4):
-        header = {"dl_type": 34525}
-      else:
-        header = {"nw_dst": int(prefix),
-                  "nw_dst_mask": int(prefix.prefixlen)}
+      header = {"nw_dst": prefix}
         
       self.fireForwardingStateChangeHandlers( dpid         = dpid,
                                               domain       = domain_name,
@@ -822,8 +834,7 @@ class SciPass:
             header = {"dl_type": 34525,
                       "phys_port": int(in_port['port_id'])}
           else:
-            header = {"nw_src":      int(prefix),
-                      "nw_src_mask": int(prefix.prefixlen),
+            header = {"nw_src":      prefix,
                       "phys_port":   int(in_port['port_id'])}
 
           actions = []
@@ -854,20 +865,10 @@ class SciPass:
 
           header = {}
           if(self.config[dpid][domain_name]['mode'] == "SciDMZ" or self.config[dpid][domain_name]['mode'] == "InlineIDS"):
-            if(prefix._version != 4):
-              header = {"dl_type": 34525,
-                        "phys_port": int(ports['wan'][0]['port_id'])}
-            else:
-              header = {"nw_dst":      int(prefix),
-                        "nw_dst_mask": int(prefix.prefixlen),
-                        "phys_port":   int(ports['wan'][0]['port_id'])}
+            header = {"nw_dst":      prefix,
+                      "phys_port":   int(ports['wan'][0]['port_id'])}
           else:
-            if(prefix._version != 4):
-              header = {"dl_type": 34525,
-                        "phys_port": int(in_port['port_id'])}
-            else:
-              header = {"nw_dst": int(prefix),
-                        "nw_dst_mask": int(prefix.prefixlen),
+              header = {"nw_dst": prefix,
                         "phys_port": int(in_port['port_id'])}
 
           actions = []
@@ -900,11 +901,7 @@ class SciPass:
 
     if self.config[dpid][domain_name]['mode'] == "SimpleBalancer":
       header = {}
-      if(prefix._version != 4):
-        header = {"dl_type": 34525}
-      else:
-        header = {"nw_src":      int(prefix),
-                  "nw_src_mask": int(prefix.prefixlen)}
+      header = {"nw_src":      prefix}
 
       actions = []
       #output to sensor (basically this is the IDS balance case)                                                                                                
@@ -917,11 +914,7 @@ class SciPass:
                                               hard_timeout = 0,
                                               priority     = priority)
       
-      if(prefix._version != 4):
-        header = {"dl_type": 34525}
-      else:
-        header = {"nw_dst": int(prefix),
-                  "nw_dst_mask": int(prefix.prefixlen)}
+      header = {"nw_dst": prefix}
 
       self.fireForwardingStateChangeHandlers( dpid         = dpid,
                                               domain       = domain_name,
@@ -946,13 +939,8 @@ class SciPass:
           in_port = port
 
           header = {}
-          if(prefix._version != 4):
-            header = {"dl_type": 34525,
-                      "phys_port": int(in_port['port_id'])}
-          else:
-            header = {"nw_src":      int(prefix),
-                      "nw_src_mask": int(prefix.prefixlen),
-                      "phys_port":   int(in_port['port_id'])}
+          header = {"nw_src":      prefix,
+                    "phys_port":   int(in_port['port_id'])}
     
           actions = []
           self.fireForwardingStateChangeHandlers( dpid         = dpid,
@@ -970,12 +958,10 @@ class SciPass:
               header = {"dl_type": 34525,
                         "phys_port": int(ports['wan'][0]['port_id'])}
             else:
-              header = {"nw_dst":      int(prefix),
-                        "nw_dst_mask": int(prefix.prefixlen),
+              header = {"nw_dst":      prefix,
                         "phys_port":   int(ports['wan'][0]['port_id'])}
           else:
-            header = {"nw_dst":      int(prefix),
-                      "nw_dst_mask": int(prefix.prefixlen),
+            header = {"nw_dst":      prefix,
                       "phys_port":   int(in_port['port_id'])}
 
           actions = []

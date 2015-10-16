@@ -17,7 +17,7 @@
 import logging
 import struct
 import time
-
+import pprint
 from ryu import cfg
 from operator import attrgetter
 from ryu.base import app_manager
@@ -169,7 +169,7 @@ class Ryu(app_manager.RyuApp):
         
         self.ports = defaultdict(dict);
         self.prefix_bytes = defaultdict(lambda: defaultdict(int))
-        self.lastStatsTime = []
+        self.lastStatsTime = {}
         self.flowmods = {}
         
         api = SciPass(logger = self.logger,
@@ -200,22 +200,31 @@ class Ryu(app_manager.RyuApp):
         #support different OF versions!
         if(ofp.OFP_VERSION == ofproto_v1_3.OFP_VERSION):
             self.logger.debug("Generating OF 1.3 FlowMod")
-            flow = self.OF10_flow(datapath, header=header, actions=actions, command=command, idle_timeout=idle_timeout, hard_timeout=hard_timeout, priority=priority)
+            flow = self.OF13_flow(datapath, header=header, actions=actions, command=command, idle_timeout=idle_timeout, hard_timeout=hard_timeout, priority=priority)
         elif (ofp.OFP_VERSION == ofproto_v1_0.OFP_VERSION):
             self.logger.debug("Generating OF 1.0 FlowMod")
-            flow = self.OF13_flow(datapath, header=header, actions=actions, command=command, idle_timeout=idle_timeout, hard_timeout=hard_timeout, priority=priority)
+            flow = self.OF10_flow(dp=datapath, header=header, actions=actions, command=command, idle_timeout=idle_timeout, hard_timeout=hard_timeout, priority=priority)
         else:
             self.logger.error("Unsupported OF Version")
             return
 
         if(datapath.is_active == True):
-            datapath.send_msg(mod)
+            print flow
+            self.logger.debug("Installing Flow: " + str(flow))
+            datapath.send_msg(flow)
         else:
             self.logger.error("Device is not connected")
 
-    def OF13_flow_rule(self, dp=None, header=None, actions=None, command=None, idle_timeout=None, hard_timeout=None, priority=1):
+    def OF13_flow(self, dp=None, header=None, actions=None, command=None, idle_timeout=None, hard_timeout=None, priority=1):
+        ofp      = dp.ofproto
+        parser   = dp.ofproto_parser
         obj = {}
        
+        obj['ipv6_src'] = None
+        obj['ipv6_dst'] = None
+        obj['ipv4_src'] = None
+        obj['ipv4_dst'] = None
+
         if(header.has_key('phys_port')):
             obj['in_port'] = int(header['phys_port'])
         else:
@@ -224,18 +233,10 @@ class Ryu(app_manager.RyuApp):
         
         if(header.has_key('nw_src')):
             if(header['nw_src'].version == 4):
-                if(header.has_key['nw_src_mask']):
-                    addr = ipaddr.IPv4Network(header['nw_src'] + "/" + header['nw_src_mask'])
-                    obj['ipv4_src'] = str(addr)
-                else:
-                    obj['ipv4_src'] = str(ipaddr.IPv4Network(header['nw_src']))
+                obj['ipv4_src'] = str(header['nw_src'])
                 obj['dl_type'] = 0x800
             elif(header['nw_src'].version == 6):
-                if(header.has_key['nw_src_mask']):
-                    addr = ipaddr.IPv6Network(header['nw_src'] + "/" + header['nw_src_mask'])
-                    obj['ipv6_src'] = str(addr)
-                else:
-                    obj['ipv6_src'] = str(ipaddr.IPv4Network(header['nw_src']))
+                obj['ipv6_src'] = str(header['nw_src'])
                 obj['dl_type'] = 0x86dd
         else:
             obj['nw_src'] = None
@@ -245,21 +246,13 @@ class Ryu(app_manager.RyuApp):
                 if(obj.has_key('ipv6_src')):
                     self.logger.error("IPv4 and IPv6 in the same message")
                     return
-                if(header.has_key['nw_dst_mask']):
-                    addr = ipaddr.IPv4Network(header['nw_dst'] + "/" + header['nw_dst_mask'])
-                    obj['ipv4_dst'] = str(addr)
-                else:
-                    obj['ipv4_dst'] = str(ipaddr.IPv4Network(header['nw_dst']))
+                obj['ipv4_dst'] = str(header['nw_dst'])
                 obj['dl_type'] = 0x800
             elif(header['nw_dst'].version == 6):
                 if(obj.has_key('ipv4_src')):
                     self.logger.error("IPv4 and IPv6 in the same message")
                     return
-                if(header.has_key['nw_dst_mask']):
-                    addr = ipaddr.IPv6Network(header['nw_dst'] + "/" + header['nw_dst_mask'])
-                    obj['ipv6_dst'] = str(addr)
-                else:
-                    obj['ipv6_dst'] = str(ipaddr.IPv6Network(header['nw_dst']))
+                obj['ipv6_dst'] = str(header['nw_dst'])
                 obj['dl_type'] = 0x86dd
         else:
             obj['nw_dst'] = None
@@ -288,6 +281,12 @@ class Ryu(app_manager.RyuApp):
             self.logger.error("TCP and UDP ports")
             return
                     
+        obj['ip_proto'] = None
+        obj['tcp_src'] = None
+        obj['tcp_dst'] = None
+        obj['udp_src'] = None
+        obj['udp_dst'] = None
+
         if(header.has_key('tcp_src')):
             obj['tcp_src'] = header['tcp_src']
             obj['ip_proto'] = 6
@@ -295,6 +294,8 @@ class Ryu(app_manager.RyuApp):
         if(header.has_key('tcp_dst')):
             obj['tcp_dst'] = header['tcp_dst']
             obj['ip_proto'] = 6
+        else:
+            obj['tcp_dst'] = None
 
         if(header.has_key('udp_src')):
             obj['udp_src'] = header['udp_src']
@@ -304,16 +305,19 @@ class Ryu(app_manager.RyuApp):
             obj['udp_dst'] = header['udp_dst']
             obj['ip_proto'] = 17
 
+        pp = pprint.PrettyPrinter()
+        pp.pprint(obj)
+
         match = parser.OFPMatch( in_port     = obj['in_port'],
-                                 ipv4_src    = obj['ipv4_src'],
-                                 ipv4_dst    = obj['ipv4_dst'],
-                                 ipv6_src    = obj['ipv6_src'],
-                                 ipv6_dst    = obj['ipv6_dst'],
-                                 tcp_src     = obj['tcp_src'],
-                                 tcp_dst     = obj['tcp_dst'],
-                                 udp_src     = obj['udp_src'],
-                                 udp_dst     = obj['udp_dst'],
-                                 ip_proto    = obj['ip_proto']
+                                 #ipv4_src    = obj['ipv4_src'],
+                                 #ipv4_dst    = obj['ipv4_dst'],
+                                 #ipv6_src    = obj['ipv6_src'],
+                                 #ipv6_dst    = obj['ipv6_dst'],
+                                 #tcp_src     = obj['tcp_src'],
+                                 #tcp_dst     = obj['tcp_dst'],
+                                 #udp_src     = obj['udp_src'],
+                                 #udp_dst     = obj['udp_dst'],
+                                 #ip_proto    = obj['ip_proto']
                                  )
 
         of_actions = []
@@ -350,7 +354,9 @@ class Ryu(app_manager.RyuApp):
 
         return mod
         
-    def OF10_flow_rule(self, dp=None, header=None, actions=None, command=None, idle_timeout=None, hard_timeout=None, priority=1):
+    def OF10_flow(self, dp=None, header=None, actions=None, command=None, idle_timeout=None, hard_timeout=None, priority=1):
+        ofp      = dp.ofproto
+        parser   = dp.ofproto_parser
         obj = {}
         if(header.has_key('dl_type')):
             if(header['dl_type'] == None):
@@ -367,22 +373,16 @@ class Ryu(app_manager.RyuApp):
             
         if(header.has_key('nw_src')):
             obj['nw_src'] = int(header['nw_src'])
+            obj['nw_src_mask'] = int(header['nw_src'].prefixlen)
         else:
             obj['nw_src'] = None
-             
-        if(header.has_key('nw_src_mask')):
-            obj['nw_src_mask'] = int(header['nw_src_mask'])
-        else:
             obj['nw_src_mask'] = None
          
         if(header.has_key('nw_dst')):
             obj['nw_dst'] = int(header['nw_dst'])
+            obj['nw_dst_mask'] = int(header['nw_dst'].prefixlen)
         else:
             obj['nw_dst'] = None
-
-        if(header.has_key('nw_dst_mask')):
-            obj['nw_dst_mask'] = int(header['nw_dst_mask'])
-        else:
             obj['nw_dst_mask'] = None
 
         if(header.has_key('tp_src')):
@@ -395,6 +395,9 @@ class Ryu(app_manager.RyuApp):
         else:
             obj['tp_dst'] = None
             
+
+        print obj
+
         if(obj['dl_type'] == None):
             match = parser.OFPMatch( in_port     = obj['in_port'],
                                      nw_dst      = obj['nw_dst'],
@@ -422,21 +425,24 @@ class Ryu(app_manager.RyuApp):
                 
             self.logger.debug("Actions: " + str(of_actions))
             flags = 0
-            if(command == "ADD"):
-                command = ofp.OFPFC_ADD
-                flags = ofp.OFPFF_SEND_FLOW_REM
-            elif(command == "DELETE_STRICT"):
-                command = ofp.OFPFC_DELETE_STRICT
-            else:
-                command = -1
+            print "Command: " + str(command)
+
+        if(command == "ADD"):
+            command = ofp.OFPFC_ADD
+            flags = ofp.OFPFF_SEND_FLOW_REM
+        elif(command == "DELETE_STRICT"):
+            command = ofp.OFPFC_DELETE_STRICT
+        else:
+            command = -1
 
         self.logger.debug("Sending flow mod with command: " + str(command))
-        self.logger.debug("Datpath: " + str(datapath))
+        self.logger.debug("Datpath: " + str(dp))
         
-        mod = parser.OFPFlowMod( datapath     = datapath,
+        mod = parser.OFPFlowMod( datapath     = dp,
                                  priority     = int(priority),
                                  match        = match,
                                  cookie       = 0,
+                                 buffer_id    = ofp.OFP_NO_BUFFER,
                                  command      = command,
                                  idle_timeout = int(idle_timeout),
                                  hard_timeout = int(hard_timeout),
@@ -570,6 +576,7 @@ class Ryu(app_manager.RyuApp):
             
             self.flushRules(dpid) 
             self.defaultDrop(dpid)
+            self.lastStatsTime[dpid] = None
             #--- start the balancing act
             self.api.switchJoined(datapath)
 
@@ -670,7 +677,11 @@ class Ryu(app_manager.RyuApp):
         flows = []
         dpid = dp.id
         ofproto = dp.ofproto
-        old_time = self.lastStatsTime[dpid]
+        if(self.lastStatsTime.has_key(dpid)):
+            old_time = self.lastStatsTime[dpid]
+        else:
+            self.lastStatsTime[dpid] = None
+            old_time = None
         now = int(time.time())
         
         stats_et = None
@@ -796,7 +807,12 @@ class Ryu(app_manager.RyuApp):
         flows = []
         dpid = dp.id
         ofproto = dp.ofproto
-        old_time = self.lastStatsTime[dpid]
+        if(self.lastStatsTime.has_key(dpid)):
+            old_time = self.lastStatsTime[dpid]
+        else:
+            self.lastStatsTime[dpid] = None
+            old_time = None
+            
         now = int(time.time())
 
         stats_et = None

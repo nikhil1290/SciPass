@@ -218,15 +218,21 @@ class SimpleBalancer:
                       group_index = 0
           else:
               #handle IPv6 differently
-              group = self.groups.keys()[group_index]
-              self.logger.debug("Adding prefix %s to group: %s", str(prefix), str(self.groups[group]['group_id']))
-              try:
-                  self.addGroupPrefix( self.groups[group]['group_id'], prefix, 0)
-              except DuplicatePrefixError:
-                  self.logger.debug("Already have prefix: " + str(prefix))
-              group_index += 1
-              if(group_index >= len(self.groups)):
-                  group_index = 0
+              if(prefix.prefixlen < self.ipv6LeastSpecificPrefixLen):
+                  try:
+                      self.distributePrefixes( self.splitPrefix(prefix) )
+                  except MaxPrefixlenError:
+                      self.logger.error("Exceeded the most specific prefix len!\n");
+              else:
+                  group = self.groups.keys()[group_index]
+                  self.logger.debug("Adding prefix %s to group: %s", str(prefix), str(self.groups[group]['group_id']))
+                  try:
+                      self.addGroupPrefix( self.groups[group]['group_id'], prefix, 0)
+                  except DuplicatePrefixError:
+                      self.logger.debug("Already have prefix: " + str(prefix))
+                  group_index += 1
+                  if(group_index >= len(self.groups)):
+                      group_index = 0
               
   def pushAllPrefixes(self):
       for group in self.groups:
@@ -530,11 +536,18 @@ class SimpleBalancer:
 
   def splitPrefix(self,prefix):
     """takes a prefix and splits it into 2 subnets that by increasing masklen by 1 bit"""
-    self.logger.debug("Most Specific: " + str(self.mostSpecificPrefixLen))
-    if(prefix.prefixlen <= int(self.mostSpecificPrefixLen) - 1):
-        return prefix.Subnet()
+    if(prefix.version == 4):
+        self.logger.debug("Most Specific: " + str(self.mostSpecificPrefixLen))
+        if(prefix.prefixlen <= int(self.mostSpecificPrefixLen) - 1):
+            return prefix.Subnet()
+        else:
+            raise MaxPrefixlenError(prefix);   
     else:
-        raise MaxPrefixlenError(prefix);   
+        self.logger.debug("Most Specific: " + str(self.ipv6MostSpecificPrefixLen))
+        if(prefix.prefixlen <= int(self.ipv6MostSpecificPrefixLen) - 1):
+            return prefix.Subnet()
+        else:
+            raise MaxPrefixlenError(prefix);
 
   def splitPrefixForSensors(self,prefix,numSensors):
     """splits a prefix into subnets for balancing across, it will go up to the power of 2 value that contains numSensors"""
