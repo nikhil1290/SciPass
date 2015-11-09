@@ -85,6 +85,7 @@ class SciPass:
           priority = self.config[dpid][name]['default_whitelist_priority']
         else:
           priority = obj['priority']
+          
 
         #step one figure out the actions :)
         #lets just calculate the wan ports involved here
@@ -122,8 +123,9 @@ class SciPass:
           for prefix in port['prefixes']:
             #ok we'll see if the src matches
             if(prefix['prefix'].Contains( src_prefix )):
-              header = self._build_header(obj,False)    
+              header , match = self._build_header(obj,False)    
               header['phys_port'] = int(port['port_id'])
+              match['phys_port'] = int(port['port_id'])
               self.fireForwardingStateChangeHandlers( dpid         = dpid,
                                                       domain       = name,
                                                       header       = header,
@@ -132,14 +134,15 @@ class SciPass:
                                                       idle_timeout = idle_timeout,
                                                       hard_timeout = 0,
                                                       priority     = priority )
-              good_flow = {'dpid' : dpid, 'domain': name, 'header' : header,
+              good_flow = {'dpid' : dpid, 'domain': name, 'header' : match,
                            'actions' : wan_action , 'idle_timeout' :  idle_timeout, 'hard_timeout' : 0,
                            'priority' : priority}
               self.whiteList.append(good_flow)
               #now do the wan side (there might be multiple)
               for wan in used_wan_ports:
-                header = self._build_header(obj,True)
+                header, match= self._build_header(obj,True)
                 header['phys_port'] = int(wan)
+                match['phys_port'] = int(wan)
                 self.fireForwardingStateChangeHandlers( dpid         = dpid,
                                                         domain       = name,
                                                         header       = header,
@@ -149,14 +152,15 @@ class SciPass:
                                                         hard_timeout = 0,
                                                         priority     = priority )
             
-                good_flow = {'dpid' : dpid, 'domain': name, 'header': header,
+                good_flow = {'dpid' : dpid, 'domain': name, 'header': match,
                              'actions' : lan_action , 'idle_timeout' :  idle_timeout, 'hard_timeout' : 0,
                              'priority' : priority}
                 self.whiteList.append(good_flow)
             #check the other dir          
             if(prefix['prefix'].Contains( dst_prefix )):
-              header = self._build_header(obj,True)
+              header, match = self._build_header(obj,True)
               header['phys_port'] = int(port['port_id'])
+              match['phys_port'] = int(port['port_id'])
               self.fireForwardingStateChangeHandlers( dpid         = dpid,
                                                       domain       = name,
                                                       header       = header,
@@ -165,14 +169,15 @@ class SciPass:
                                                       idle_timeout = idle_timeout,
                                                       hard_timeout = 0,
                                                       priority     = priority)
-              good_flow = {'dpid' : dpid, 'domain': name, 'header': header,
+              good_flow = {'dpid' : dpid, 'domain': name, 'header': match,
                            'actions' : wan_action , 'idle_timeout' :  idle_timeout, 'hard_timeout' : 0,
                            'priority' : priority}
               self.whiteList.append(good_flow)
               #now do the wan side (there might be multiple)
               for wan in used_wan_ports:
-                header = self._build_header(obj,True)
+                header, match = self._build_header(obj,False)
                 header['phys_port'] = int(wan)
+                match['phys_port'] = int(wan)
                 self.fireForwardingStateChangeHandlers( dpid         = dpid,
                                                         domain       = name,
                                                         header       = header,
@@ -181,73 +186,85 @@ class SciPass:
                                                         idle_timeout = idle_timeout,
                                                         hard_timeout = 0,
                                                         priority     = priority )
-                good_flow = {'dpid' : dpid, 'domain': name, 'header': header,
+                good_flow = {'dpid' : dpid, 'domain': name, 'header': match,
                              'actions' : lan_action , 'idle_timeout' :  idle_timeout, 'hard_timeout' : 0,
                              'priority' : priority}
                 self.whiteList.append(good_flow)
+   
     results = {}
     results['success'] = 1
     return results
 
   def _build_header(self, obj, reverse):
     header = {}
-    
+    match = {} #serializable header
     if(obj.has_key('nw_src')):
       if(reverse):
         prefix = ipaddr.IPv4Network(obj['nw_src'])
         header['nw_dst'] = prefix
+        match['nw_dst']  = obj['nw_src']
       else:
         prefix = ipaddr.IPv4Network(obj['nw_src'])
         header['nw_src'] = prefix
-        
+        match['nw_src']  = obj['nw_src']
     if(obj.has_key('nw_dst')):
       if(reverse):
         prefix = ipaddr.IPv4Network(obj['nw_dst'])
         header['nw_src'] = prefix
+        match['nw_src']  = obj['nw_dst']
       else:
         prefix = ipaddr.IPv4Network(obj['nw_dst'])
         header['nw_dst'] = prefix
-
+        match['nw_dst']  = obj['nw_dst']
     #OF10
     if(obj.has_key('tp_src')):
       if(reverse):
         header['tp_dst'] = int(obj['tp_src'])
+        match['tp_dst']  = int(obj['tp_src'])
       else:
         header['tp_src'] = int(obj['tp_src'])
+        match['tp_src']  =  int(obj['tp_src'])
 
     if(obj.has_key('tp_dst')):
       if(reverse):
         header['tp_src'] = int(obj['tp_dst'])
+        match['tp_src']  = int(obj['tp_dst'])
       else:
         header['tp_dst'] = int(obj['tp_dst'])
-   
+        match['tp_dst']  = int(obj['tp_dst'])
     #OF13
     if(obj.has_key('tcp_src')):
       if(reverse):
         header['tcp_dst'] = int(obj['tcp_src'])
+        match['tcp_dst']  = int(obj['tcp_src'])
       else:
         header['tcp_src'] = int(obj['tcp_src'])
+        match['tcp_src']  = int(obj['tcp_src'])
 
     if(obj.has_key('tcp_dst')):
       if(reverse):
         header['tcp_src'] = int(obj['tcp_dst'])
+        match['tcp_src'] =  int(obj['tcp_dst'])
       else:
         header['tcp_dst'] = int(obj['tcp_dst'])
-  
+        match['tcp_dst'] =  int(obj['tcp_dst'])
+
     if(obj.has_key('udp_src')):
       if(reverse):
         header['udp_dst'] = int(obj['udp_src'])
+        match['udp_dst']  = int(obj['udp_src'])
       else:
         header['udp_src'] = int(obj['udp_src'])
+        match['udp_src']  = int(obj['udp_src'])
                             
     if(obj.has_key('udp_dst')):
       if(reverse):
         header['udp_src'] = int(obj['udp_dst'])
+        match['udp_src']  = int(obj['udp_dst'])
       else:
         header['udp_dst'] = int(obj['udp_dst'])
-
-
-    return header
+        match['udp_dst']  = int(obj['udp_dst'])
+    return header, match
 
   def bad_flow(self, obj):
     #turn this into a
@@ -280,12 +297,12 @@ class SciPass:
               actions = []
 
               #build a header based on what was sent
-              header = self._build_header(obj,False) 
+              header , match = self._build_header(obj,False) 
               
               if not self.config[datapath_id][name]['mode'] == "SimpleBalancer":
                 #set the port of the header
                 header['phys_port'] = int(port['port_id'])
-
+                match['phys_port'] = int(port['port_id'])
               self.logger.debug("Header: " + str(header))
               self.fireForwardingStateChangeHandlers( dpid         = datapath_id,
                                                       domain       = name,
@@ -294,15 +311,16 @@ class SciPass:
                                                       command      = "ADD",
                                                       idle_timeout = idle_timeout,
                                                       priority     = priority)
-              bad_flow = {'dpid' : datapath_id, 'domain': name, 'header' : header,
+              bad_flow = {'dpid' : datapath_id, 'domain': name, 'header' : match,
                            'actions' : actions , 'idle_timeout' :  idle_timeout,
                            'priority' : priority}
               self.blackList.append(bad_flow)
               for wan in self.config[datapath_id][name]['ports']['wan']:
                 #build a header based on what was set
-                header = self._build_header(obj,True)
+                header, match = self._build_header(obj,True)
                 #set the port
-                header['phys_port'] = int(wan['port_id'])
+                header['phys_port'] = int(port['port_id'])
+                match['phys_port'] = int(port['port_id'])
                 self.logger.debug("Header: " + str(header))
                 self.fireForwardingStateChangeHandlers( dpid         = datapath_id,
                                                         domain       = name,
@@ -311,7 +329,7 @@ class SciPass:
                                                         command      = "ADD",
                                                         idle_timeout = idle_timeout,
                                                         priority     = priority)
-                bad_flow = {'dpid' : datapath_id, 'domain': name, 'header' : header,
+                bad_flow = {'dpid' : datapath_id, 'domain': name, 'header' : match,
                            'actions' : actions , 'idle_timeout' :  idle_timeout,
                            'priority' : priority}
                 self.blackList.append(bad_flow)
@@ -320,12 +338,12 @@ class SciPass:
               #actions drop
               actions = []
               #build a header based on what was setn
-              header = self._build_header(obj,True)
+              header,match = self._build_header(obj,True)
               
               if not self.config[datapath_id][name]['mode'] == "SimpleBalancer":
                 #set the port
                 header['phys_port'] = int(port['port_id'])
-
+                match['phys_port'] = int(port['port_id'])
               self.logger.debug("Header: " + str(header))
               self.fireForwardingStateChangeHandlers( dpid         = datapath_id,
                                                       domain       = name,
@@ -334,15 +352,16 @@ class SciPass:
                                                       command      = "ADD",
                                                       idle_timeout = idle_timeout,
                                                       priority     = priority)
-              bad_flow = {'dpid' : datapath_id, 'domain': name, 'header' : header,
+              bad_flow = {'dpid' : datapath_id, 'domain': name, 'header' : match,
                           'actions' : actions , 'idle_timeout' :  idle_timeout,
                           'priority' : priority}
               self.blackList.append(bad_flow)
               for wan in self.config[datapath_id][name]['ports']['wan']:
                 #build a header based on what was set
-                header = self._build_header(obj,False)
+                header,match = self._build_header(obj,False)
                 #set the port
                 header['phys_port'] = int(wan['port_id'])
+                match['phys_port'] = int(wan['port_id'])
                 self.logger.debug("Header: " + str(header))
                 self.fireForwardingStateChangeHandlers( dpid         = datapath_id,
                                                         domain       = name,
@@ -352,7 +371,7 @@ class SciPass:
                                                         idle_timeout = idle_timeout,
                                                         priority     = priority)
 
-                bad_flow = {'dpid' : datapath_id, 'domain': name, 'header' : header,
+                bad_flow = {'dpid' : datapath_id, 'domain': name, 'header' : match,
                             'actions' : actions , 'idle_timeout' :  idle_timeout,
                             'priority' : priority}
                 self.blackList.append(bad_flow)
@@ -510,8 +529,8 @@ class SciPass:
               #              "prefix": ipaddr.IPv6Network(prefix.getContent())}
               prefix_obj = {"type": prefix.prop("type"),
                             "prefix_str": prefix.getContent(),
-                            "prefix": ipaddr.IPv6Newtork(prefix.getContent())}
-
+                            "prefix": ipaddr.IPv6Network(prefix.getContent())}
+              
               
             prefixes_array.append(prefix_obj)
 
@@ -983,6 +1002,8 @@ class SciPass:
   def remove_flow(self, header, priority):
     self.logger.debug("remove flow")
     for white in self.whiteList:
+      pprint.pprint(white['header'])
+      pprint.pprint(header)
       if ((cmp(header, white['header']) == 0) and (cmp(priority, white['priority'])== 0)):
         """ if a good flow times out, remove it"""
         self.logger.error("Removing good flow due to timeout")
@@ -1030,35 +1051,21 @@ class SciPass:
         if(flow['header'] == header and flow['priority'] == priority):
           self.config[dpid][domain]['flows'].remove(flow)
 
-    if(idle_timeout):
-      timeout = now + int(idle_timeout) 
-      self.idleTimeouts.append({'timeout': timeout,
-                                'dpid': dpid,
-                                'domain': domain,
-                                'idle_timeout': int(idle_timeout),
-                                'pkt_count': 0,
-                                'header': header,
-                                'actions': actions,
-                                'priority': priority,
-                                'command': command})
-    if(hard_timeout):
-      timeout = now + int(hard_timeout)
-      self.hardTimeouts.append({'timeout': timeout,
-                                'dpid': dpid,
-                                'domain': domain,
-                                'header': header,
-                                'actions': actions,
-                                'priority': priority,
-                                'command': command})
-
     for handler in self.switchForwardingChangeHandlers:
       handler( dpid = dpid,
+               domain = domain,
                header = header,
                actions = actions,
                command = command,
                idle_timeout = idle_timeout,
                hard_timeout = hard_timeout,
                priority = priority)
+
+  def pushTimeouts(self,idle= None,hard= None):
+    if idle:
+      self.idleTimeouts.append(idle)
+    if hard:
+      self.hardTimeouts.append(hard)
 
   def updatePrefixBW(self,dpid, prefix, tx, rx):
     self.logger.debug("updating prefix bw")
@@ -1245,10 +1252,16 @@ class SciPass:
         if(flow['timeout'] <= now):
           self.logger.info("removing the flow due to idle timeout")
           #remove the flow
+          of_actions = []
+          for action in flow['actions']:
+            if action.type == 0:
+              of_actions.append({"type" : "output",
+                                 "port" : int(action.port)})
+          
           self.fireForwardingStateChangeHandlers( dpid         = flow['dpid'],
                                                   domain       = flow['domain'],
                                                   header       = flow['header'],
-                                                  actions      = flow['actions'],
+                                                  actions      = of_actions,
                                                   command      = "DELETE_STRICT",
                                                   priority     = flow['priority'])
           

@@ -87,7 +87,8 @@ class SimpleBalancer:
       self.addPrefixHandlers  = []
       self.delPrefixHandlers  = []
       self.movePrefixHandlers = []
-      
+      self.ipv6LeastSpecificPrefixLen = 96
+      self.ipv6MostSpecificPrefixLen = 128
       self.prefix_list = []
       self.initialized = False
       return
@@ -217,6 +218,7 @@ class SimpleBalancer:
                   if(group_index >= len(self.groups)):
                       group_index = 0
           else:
+              
               #handle IPv6 differently
               if(prefix.prefixlen < self.ipv6LeastSpecificPrefixLen):
                   try:
